@@ -57,7 +57,7 @@ class PIDTemperatureApp:
 
         # --- Controls Frame ---
         control_frame = ttk.Frame(master)
-        control_frame.pack(padx=8, pady=8, fill="x")
+        control_frame.grid(row=0, column=0, padx=8, pady=8, sticky="ew")
 
         ttk.Label(control_frame, text="Kp:").grid(row=0, column=0, sticky="w")
         ttk.Label(control_frame, text="Ki:").grid(row=1, column=0, sticky="w")
@@ -104,41 +104,50 @@ class PIDTemperatureApp:
         tk.Scale(control_frame, from_=0, to=0.1, resolution=0.001, orient="horizontal",
                  variable=self.cooling_rate_var, length=200).grid(row=4, column=1, sticky="w")
 
-        # --- Buttons Frame (fixed) ---
+        # --- Buttons Frame ---
         buttons_frame = ttk.Frame(master)
-        buttons_frame.pack(pady=5)
+        buttons_frame.grid(row=1, column=0, pady=5, sticky="ew")
 
         self.start_button = ttk.Button(buttons_frame, text="Start/Resume", command=self.start)
-        self.start_button.pack(side="left", padx=5)
+        self.start_button.grid(row=0, column=0, sticky="w", padx=5)
         self.pause_button = ttk.Button(buttons_frame, text="Pause", command=self.pause)
-        self.pause_button.pack(side="left", padx=5)
+        self.pause_button.grid(row=0, column=1, sticky="w", padx=5)
         self.reset_button = ttk.Button(buttons_frame, text="Reset", command=self.reset)
-        self.reset_button.pack(side="left", padx=5)
+        self.reset_button.grid(row=0, column=2, sticky="w", padx=5)
 
-        # --- Display ---
+        # --- Display Frame ---
         display_frame = ttk.Frame(master)
-        display_frame.pack(pady=5, fill="x")
+        display_frame.grid(row=2, column=0, pady=5, sticky="ew")
 
         self.current_temp_var = tk.StringVar(value="Temp: 0.0 C")
         self.current_power_var = tk.StringVar(value="Power: 0.0 W")
-        ttk.Label(display_frame, textvariable=self.current_temp_var).pack(side="left", padx=5)
-        ttk.Label(display_frame, textvariable=self.current_power_var).pack(side="left", padx=5)
+        ttk.Label(display_frame, textvariable=self.current_temp_var).grid(row=0, column=0, padx=5, sticky="w")
+        ttk.Label(display_frame, textvariable=self.current_power_var).grid(row=0, column=1, padx=5, sticky="w")
 
-        # --- Plot ---
+        # --- Plot Frame ---
+        plot_frame = ttk.Frame(master)
+        plot_frame.grid(row=3, column=0, sticky="nsew")
+        master.grid_rowconfigure(3, weight=1)
+        master.grid_columnconfigure(0, weight=1)
+
         fig = Figure(figsize=(8, 6), dpi=100)
         self.ax_temp = fig.add_subplot(211)
         self.ax_temp.set_title("Temperature vs Time")
         self.ax_power = fig.add_subplot(212)
         self.ax_power.set_title("Power vs Time")
         fig.subplots_adjust(hspace=0.4)
-        self.canvas = FigureCanvasTkAgg(fig, master=master)
-        self.canvas.get_tk_widget().pack(fill="both", expand=True)
 
-        # --- Data & system ---
+        self.canvas = FigureCanvasTkAgg(fig, master=plot_frame)
+        self.canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")
+
+        # --- Data & System ---
         self.time_data, self.temp_data, self.power_data = [], [], []
         self.heat_power_data, self.cool_power_data = [], []
-        self.system = SimpleThermalSystem(initial_temp=self.initial_temp_var.get(), cooling_rate=self.cooling_rate_var.get())
-        self.pid = PID(kd=self.kd_var.get(), integral_limit_pos=self.integral_max_var.get(), integral_limit_neg=self.integral_min_var.get())
+        self.system = SimpleThermalSystem(initial_temp=self.initial_temp_var.get(),
+                                          cooling_rate=self.cooling_rate_var.get())
+        self.pid = PID(kd=self.kd_var.get(),
+                       integral_limit_pos=self.integral_max_var.get(),
+                       integral_limit_neg=self.integral_min_var.get())
         self.running, self.paused = False, False
 
     def start(self):
@@ -147,7 +156,8 @@ class PIDTemperatureApp:
         else:
             self.running = True
             self.paused = False
-            self.system = SimpleThermalSystem(initial_temp=self.initial_temp_var.get(), cooling_rate=self.cooling_rate_var.get())
+            self.system = SimpleThermalSystem(initial_temp=self.initial_temp_var.get(),
+                                              cooling_rate=self.cooling_rate_var.get())
             self.thread = threading.Thread(target=self.control_loop, daemon=True)
             self.thread.start()
 
@@ -158,7 +168,8 @@ class PIDTemperatureApp:
         self.running = False
         self.paused = False
         time.sleep(0.1)
-        self.system = SimpleThermalSystem(initial_temp=self.initial_temp_var.get(), cooling_rate=self.cooling_rate_var.get())
+        self.system = SimpleThermalSystem(initial_temp=self.initial_temp_var.get(),
+                                          cooling_rate=self.cooling_rate_var.get())
         self.pid.integral, self.pid.prev_error = 0, 0
         self.time_data.clear()
         self.temp_data.clear()
@@ -228,5 +239,6 @@ class PIDTemperatureApp:
 
 if __name__ == "__main__":
     root = tk.Tk()
+    root.geometry("900x700")
     app = PIDTemperatureApp(root)
     root.mainloop()
