@@ -9,8 +9,12 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 
 
+# ======================
+# PID Controller (with user-requested clamp-integral condition)
+# ======================
 class PID:
-    def __init__(self, kp=1.0, ki=0.0, kd=0.05, integral_limit_pos=100.0, integral_limit_neg=-100.0):
+    def __init__(self, kp=1.0, ki=0.0, kd=0.05,
+                 integral_limit_pos=100.0, integral_limit_neg=-100.0):
         self.kp = kp
         self.ki = ki
         self.kd = kd
@@ -20,24 +24,47 @@ class PID:
         self.integral_limit_pos = integral_limit_pos
         self.integral_limit_neg = integral_limit_neg
 
-    def update(self, setpoint, measurement):
+    def update(self, setpoint, measurement, max_power):
         now = time.time()
         dt = now - self.last_time
         if dt <= 0:
             dt = 1e-6
 
         error = setpoint - measurement
-        self.integral += error * dt
-        self.integral = max(min(self.integral, self.integral_limit_pos), self.integral_limit_neg)
-
         derivative = (error - self.prev_error) / dt
-        output = self.kp * error + self.ki * self.integral + self.kd * derivative
+
+        output_unsat_now = self.kp * error + self.ki * self.integral + self.kd * derivative
+
+        clamp_threshold_pos = 1.0
+        clamp_threshold_neg = -1.0
+
+        if (output_unsat_now >= clamp_threshold_pos and error > 0) or \
+           (output_unsat_now <= clamp_threshold_neg and error < 0):
+            self.integral = max(min(self.integral, self.integral_limit_pos), self.integral_limit_neg)
+        else:
+            self.integral += error * dt
+            self.integral = max(min(self.integral, self.integral_limit_pos), self.integral_limit_neg)
+
+        output_unsat = self.kp * error + self.ki * self.integral + self.kd * derivative
+
+        if measurement >= setpoint and output_unsat > 0:
+            output = 0.0
+        elif measurement <= setpoint and output_unsat < 0:
+            output = 0.0
+        else:
+            if max_power is not None:
+                output = max(min(output_unsat, max_power), -max_power)
+            else:
+                output = output_unsat
 
         self.prev_error = error
         self.last_time = now
         return output
 
 
+# ======================
+# Simple Thermal Simulation
+# ======================
 class SimpleThermalSystem:
     def __init__(self, initial_temp=20.0, ambient_temp=20.0, cooling_rate=0.02):
         self.temperature = initial_temp
@@ -50,6 +77,9 @@ class SimpleThermalSystem:
         return self.temperature
 
 
+# ======================
+# Tkinter App
+# ======================
 class PIDTemperatureApp:
     def __init__(self, master):
         self.master = master
@@ -124,18 +154,24 @@ class PIDTemperatureApp:
         ttk.Label(display_frame, textvariable=self.current_temp_var).grid(row=0, column=0, padx=5, sticky="w")
         ttk.Label(display_frame, textvariable=self.current_power_var).grid(row=0, column=1, padx=5, sticky="w")
 
-        # --- Plot Frame ---
+        # --- Plot Frame (FIXED) ---
         plot_frame = ttk.Frame(master)
         plot_frame.grid(row=3, column=0, sticky="nsew")
         master.grid_rowconfigure(3, weight=1)
         master.grid_columnconfigure(0, weight=1)
+
+        # allow canvas expansion
+        plot_frame.grid_rowconfigure(0, weight=1)
+        plot_frame.grid_columnconfigure(0, weight=1)
 
         fig = Figure(figsize=(8, 6), dpi=100)
         self.ax_temp = fig.add_subplot(211)
         self.ax_temp.set_title("Temperature vs Time")
         self.ax_power = fig.add_subplot(212)
         self.ax_power.set_title("Power vs Time")
-        fig.subplots_adjust(hspace=0.4)
+
+        fig.tight_layout()
+        fig.subplots_adjust(hspace=0.35)
 
         self.canvas = FigureCanvasTkAgg(fig, master=plot_frame)
         self.canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")
@@ -158,6 +194,9 @@ class PIDTemperatureApp:
             self.paused = False
             self.system = SimpleThermalSystem(initial_temp=self.initial_temp_var.get(),
                                               cooling_rate=self.cooling_rate_var.get())
+            self.pid.integral = 0.0
+            self.pid.prev_error = 0.0
+            self.pid.last_time = time.time()
             self.thread = threading.Thread(target=self.control_loop, daemon=True)
             self.thread.start()
 
@@ -170,12 +209,16 @@ class PIDTemperatureApp:
         time.sleep(0.1)
         self.system = SimpleThermalSystem(initial_temp=self.initial_temp_var.get(),
                                           cooling_rate=self.cooling_rate_var.get())
-        self.pid.integral, self.pid.prev_error = 0, 0
+
+        self.pid.integral, self.pid.prev_error = 0.0, 0.0
+        self.pid.last_time = time.time()
+
         self.time_data.clear()
         self.temp_data.clear()
         self.power_data.clear()
         self.heat_power_data.clear()
         self.cool_power_data.clear()
+
         self.update_plots()
         self.current_temp_var.set(f"Temp: {self.system.temperature:.2f} C")
         self.current_power_var.set("Power: 0.0 W")
@@ -197,8 +240,8 @@ class PIDTemperatureApp:
             max_power = abs(self.power_limit_var.get())
             self.system.cooling_rate = self.cooling_rate_var.get()
 
-            power = self.pid.update(setpoint, self.system.temperature)
-            power = max(min(power, max_power), -max_power)
+            power = self.pid.update(setpoint, self.system.temperature, max_power)
+
             temp = self.system.step(power)
 
             self.current_temp_var.set(f"Temp: {temp:.2f} C")
@@ -217,15 +260,20 @@ class PIDTemperatureApp:
     def update_plots(self):
         self.ax_temp.clear()
         self.ax_power.clear()
+
         self.ax_temp.plot(self.time_data, self.temp_data, label="Current Temp")
-        self.ax_temp.plot(self.time_data, [self.temperature_target_var.get()] * len(self.time_data), 'r--', label="Target Temp")
-        self.ax_temp.plot(self.time_data, [self.system.ambient] * len(self.time_data), 'g--', label="Ambient Temp")
+        self.ax_temp.plot(self.time_data,
+                          [self.temperature_target_var.get()] * len(self.time_data),
+                          'r--', label="Target Temp")
+        self.ax_temp.plot(self.time_data,
+                          [self.system.ambient] * len(self.time_data),
+                          'g--', label="Ambient Temp")
         self.ax_temp.set_ylabel("Temp (C)")
         self.ax_temp.legend()
         self.ax_temp.grid(True)
 
-        self.ax_power.plot(self.time_data, self.heat_power_data, 'r', label="Heating Power")
-        self.ax_power.plot(self.time_data, self.cool_power_data, 'b', label="Cooling Power")
+        self.ax_power.plot(self.time_data, self.heat_power_data, label="Heating Power")
+        self.ax_power.plot(self.time_data, self.cool_power_data, label="Cooling Power")
         self.ax_power.set_ylabel("Power (W)")
         self.ax_power.set_xlabel("Time (s)")
         self.ax_power.legend()
