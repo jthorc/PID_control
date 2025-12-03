@@ -131,7 +131,7 @@ class PIDTemperatureApp:
 
         ttk.Label(control_frame, text="Cooling Rate:").grid(row=4, column=0, sticky="w", pady=5)
         self.cooling_rate_var = tk.DoubleVar(value=0.02)
-        tk.Scale(control_frame, from_=0, to=0.1, resolution=0.001, orient="horizontal",
+        tk.Scale(control_frame, from_=0.001, to=0.1, resolution=0.001, orient="horizontal",
                  variable=self.cooling_rate_var, length=200).grid(row=4, column=1, sticky="w")
 
         # --- Buttons Frame ---
